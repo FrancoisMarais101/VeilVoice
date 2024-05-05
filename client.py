@@ -41,8 +41,25 @@ def decrypt_message(encrypted_message, key, iv):
     return decrypted_message.decode()
 
 
-# Function to receive messages and display popups
+# Function to flash the window title to indicate new messages
+def flash_title():
+    global flash_count, flashing
+    if flash_count > 5:
+        root.title(original_title)
+        flashing = False
+        return
+
+    current_title = root.title()
+    new_title = "New Message!" if current_title == original_title else original_title
+    root.title(new_title)
+
+    flash_count += 1
+    root.after(500, flash_title)
+
+
+# Function to receive messages and indicate new messages
 def receive_messages():
+    global flash_count, flashing
     while True:
         try:
             encrypted_message = client_socket.recv(1024)
@@ -54,8 +71,16 @@ def receive_messages():
             chat_box.config(state=tk.DISABLED)
             chat_box.see(tk.END)
 
-            # Show popup notification
-            messagebox.showinfo("New Message", message)
+            # Bring the window to the front and focus on it
+            root.deiconify()
+            root.lift()
+            root.focus_force()
+
+            # Flash the window title
+            if not flashing:
+                flashing = True
+                flash_count = 0
+                flash_title()
 
         except Exception as e:
             print(f"Error receiving message: {e}")
@@ -116,7 +141,12 @@ def minimize_to_tray():
 
 # Tkinter GUI setup
 root = tk.Tk()
-root.title("Secure Chat Client")
+root.title("Secure Etienne Intercom")
+
+# Global variables for the original window title and flashing state
+original_title = "Secure Etienne Intercom"
+flash_count = 0
+flashing = False
 
 chat_box = tk.Text(root, state=tk.DISABLED, width=50, height=15)
 chat_box.pack(pady=10)
