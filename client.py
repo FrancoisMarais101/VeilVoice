@@ -141,10 +141,10 @@ def minimize_to_tray():
 
 # Tkinter GUI setup
 root = tk.Tk()
-root.title("Secure Etienne Intercom")
+root.title("Secure Etienne Intercom System")
 
 # Global variables for the original window title and flashing state
-original_title = "Secure Etienne Intercom"
+original_title = "Secure Etienne Intercom System"
 flash_count = 0
 flashing = False
 
