@@ -7,7 +7,7 @@ from PIL import Image, ImageDraw, ImageTk
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives import padding
 import os
-import ctypes  # For setting the taskbar icon on Windows
+import ctypes  # For setting the taskbar icon on Windows and bringing window to foreground
 
 
 # Load encryption keys (ensure this matches the server)
@@ -77,9 +77,7 @@ def handle_received_message(message):
     chat_box.see(tk.END)
 
     # Bring the window to the front and focus on it
-    root.deiconify()
-    root.lift()
-    root.focus_force()
+    bring_window_to_foreground()
 
     # Flash the window title
     if not flashing:
@@ -87,6 +85,22 @@ def handle_received_message(message):
         flashing = True
         flash_count = 0
         flash_title()
+
+
+# Function to bring the window to the foreground
+def bring_window_to_foreground():
+    root.deiconify()
+    root.lift()
+    root.focus_force()
+    # Additional method for Windows to ensure the window is topmost
+    if os.name == "nt":
+        set_foreground_window(root)
+
+
+def set_foreground_window(root):
+    hwnd = ctypes.windll.user32.GetForegroundWindow()
+    ctypes.windll.user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, 0x0001 | 0x0002)
+    ctypes.windll.user32.SetWindowPos(hwnd, -2, 0, 0, 0, 0, 0x0001 | 0x0002)
 
 
 # Function to receive messages and indicate new messages
@@ -183,7 +197,7 @@ icon_path = (
 
 # Tkinter GUI setup
 root = tk.Tk()
-root.title("Secure Etienne Intercom System")
+root.title("SIES")
 
 
 # Function to force the taskbar icon update after initialization
