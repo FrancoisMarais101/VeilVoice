@@ -3,11 +3,12 @@ import threading
 import tkinter as tk
 from tkinter import messagebox
 from pystray import Icon, MenuItem, Menu
-from PIL import Image, ImageDraw, ImageTk
+from PIL import Image
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives import padding
 import os
-import ctypes  # For setting the taskbar icon on Windows and bringing window to foreground
+import ctypes
+from dotenv import load_dotenv
 
 
 # Load encryption keys (ensure this matches the server)
@@ -27,31 +28,44 @@ def load_keys(file_path):
 
 key, iv = load_keys("encryption_keys.bin")
 
+# Load environment variables from .env file
+load_dotenv()
+
 # Server configuration
-SERVER_IP = "127.0.0.1"  # Update with the correct IP address
-SERVER_PORT = 9999
+SERVER_IP = os.environ.get("SERVER_IP")
+SERVER_PORT = int(os.environ.get("SERVER_PORT"))
 client_socket = None
 
 
 # Encryption functions
 def encrypt_message(message, key, iv):
-    cipher = Cipher(algorithms.AES(key), modes.CBC(iv))
-    encryptor = cipher.encryptor()
-    padder = padding.PKCS7(algorithms.AES.block_size).padder()
-    padded_message = padder.update(message.encode()) + padder.finalize()
-    encrypted_message = encryptor.update(padded_message) + encryptor.finalize()
-    return encrypted_message
+    try:
+        cipher = Cipher(algorithms.AES(key), modes.CBC(iv))
+        encryptor = cipher.encryptor()
+        padder = padding.PKCS7(algorithms.AES.block_size).padder()
+        padded_message = padder.update(message.encode()) + padder.finalize()
+        encrypted_message = encryptor.update(padded_message) + encryptor.finalize()
+        return encrypted_message
+    except Exception as e:
+        print(f"Encryption error: {e}")
+        return None
 
 
 def decrypt_message(encrypted_message, key, iv):
-    cipher = Cipher(algorithms.AES(key), modes.CBC(iv))
-    decryptor = cipher.decryptor()
-    decrypted_padded_message = (
-        decryptor.update(encrypted_message) + decryptor.finalize()
-    )
-    unpadder = padding.PKCS7(algorithms.AES.block_size).unpadder()
-    decrypted_message = unpadder.update(decrypted_padded_message) + unpadder.finalize()
-    return decrypted_message.decode()
+    try:
+        cipher = Cipher(algorithms.AES(key), modes.CBC(iv))
+        decryptor = cipher.decryptor()
+        decrypted_padded_message = (
+            decryptor.update(encrypted_message) + decryptor.finalize()
+        )
+        unpadder = padding.PKCS7(algorithms.AES.block_size).unpadder()
+        decrypted_message = (
+            unpadder.update(decrypted_padded_message) + unpadder.finalize()
+        )
+        return decrypted_message.decode()
+    except Exception as e:
+        print(f"Decryption error: {e}")
+        return None
 
 
 # Function to flash the window title to indicate new messages
@@ -61,7 +75,6 @@ def flash_title():
         root.title(original_title)
         flashing = False
         return
-
     current_title = root.title()
     new_title = "New Message!" if current_title == original_title else original_title
     root.title(new_title)
@@ -75,11 +88,7 @@ def handle_received_message(message):
     chat_box.insert(tk.END, "Received: " + message + "\n")
     chat_box.config(state=tk.DISABLED)
     chat_box.see(tk.END)
-
-    # Bring the window to the front and focus on it
     bring_window_to_foreground()
-
-    # Flash the window title
     if not flashing:
         global flash_count
         flashing = True
@@ -92,15 +101,25 @@ def bring_window_to_foreground():
     root.deiconify()
     root.lift()
     root.focus_force()
-    # Additional method for Windows to ensure the window is topmost
     if os.name == "nt":
-        set_foreground_window(root)
+        set_foreground_window()
 
 
-def set_foreground_window(root):
+def set_foreground_window():
     hwnd = ctypes.windll.user32.GetForegroundWindow()
     ctypes.windll.user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, 0x0001 | 0x0002)
     ctypes.windll.user32.SetWindowPos(hwnd, -2, 0, 0, 0, 0, 0x0001 | 0x0002)
+
+
+# Function to send the disconnection reason
+def send_disconnection_reason(reason):
+    if client_socket:
+        try:
+            encrypted_message = encrypt_message(reason, key, iv)
+            if encrypted_message:
+                client_socket.send(encrypted_message)
+        except Exception as e:
+            print(f"Failed to send disconnection reason: {e}")
 
 
 # Function to receive messages and indicate new messages
@@ -110,28 +129,32 @@ def receive_messages():
         try:
             encrypted_message = client_socket.recv(1024)
             if not encrypted_message:
+                send_disconnection_reason("Client disconnected: No message received.")
                 break
             message = decrypt_message(encrypted_message, key, iv)
-            root.after(0, handle_received_message, message)
+            if message:
+                root.after(0, handle_received_message, message)
         except Exception as e:
             print(f"Error receiving message: {e}")
+            send_disconnection_reason(f"Client disconnected: {e}")
             break
 
 
 # Function to send messages
-def send_message(event=None):  # Accept an optional event argument for key binding
+def send_message(event=None):
     message = message_entry.get()
     if message:
         encrypted_message = encrypt_message(message, key, iv)
-        try:
-            client_socket.send(encrypted_message)
-            chat_box.config(state=tk.NORMAL)
-            chat_box.insert(tk.END, "Sent: " + message + "\n")
-            chat_box.config(state=tk.DISABLED)
-            chat_box.see(tk.END)
-            message_entry.delete(0, tk.END)
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to send message: {e}")
+        if encrypted_message:
+            try:
+                client_socket.send(encrypted_message)
+                chat_box.config(state=tk.NORMAL)
+                chat_box.insert(tk.END, "Sent: " + message + "\n")
+                chat_box.config(state=tk.DISABLED)
+                chat_box.see(tk.END)
+                message_entry.delete(0, tk.END)
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to send message: {e}")
 
 
 # Function to start the client and receive messages
@@ -140,7 +163,6 @@ def start_client():
     try:
         client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         client_socket.connect((SERVER_IP, SERVER_PORT))
-
         receive_thread = threading.Thread(target=receive_messages, daemon=True)
         receive_thread.start()
     except Exception as e:
@@ -152,18 +174,28 @@ def start_client():
 def show_window(icon, item):
     icon.stop()
     root.deiconify()
-    set_taskbar_icon()  # Ensure the icon is set when the window is restored
+    set_taskbar_icon()
+
+
+# Function to handle quit confirmation
+def confirm_quit():
+    response = messagebox.askyesno(
+        "Wat maak jy Bro??",
+        "Moenie nou quit nie, ek sien wat jy doen. Jy gaan spyt wees. Wil jy regtig quit?",
+    )
+    if response:
+        send_disconnection_reason("Client disconnected: User quit the application.")
+        root.quit()
 
 
 # Function to quit the application
-def quit_app(icon, item):
-    icon.stop()  # Stop the tray icon
-    root.quit()  # Exit the Tkinter main loop
+def quit_app(icon=None, item=None):
+    confirm_quit()
 
 
 # Function to minimize the application to the system tray
 def minimize_to_tray():
-    root.withdraw()  # Hide the Tkinter window
+    root.withdraw()
     try:
         icon_image = Image.open(icon_path)
         menu = Menu(MenuItem("Restore", show_window), MenuItem("Quit", quit_app))
@@ -179,11 +211,9 @@ def set_taskbar_icon():
         root.iconbitmap(icon_path)
     except Exception as e:
         print(f"Error setting taskbar icon: {e}")
-
-    # Set the taskbar icon on Windows using ctypes
     if os.name == "nt":
         try:
-            myappid = "mycompany.myproduct.subproduct.version"  # Arbitrary string
+            myappid = "mycompany.myproduct.subproduct.version"
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
             root.iconbitmap(icon_path)
         except Exception as e:
@@ -191,9 +221,7 @@ def set_taskbar_icon():
 
 
 # Load the .ico file for icons
-icon_path = (
-    "veil_voice_ckf_icon.ico"  # Ensure this is the correct path to your .ico file
-)
+icon_path = "veil_voice_ckf_icon.ico"
 
 # Tkinter GUI setup
 root = tk.Tk()
@@ -206,7 +234,6 @@ def update_taskbar_icon():
     root.after(100, lambda: root.deiconify())
 
 
-# Set the taskbar icon initially
 set_taskbar_icon()
 
 # Global variables for the original window title and flashing state
@@ -229,10 +256,14 @@ message_entry.bind("<Return>", send_message)
 # Bind the minimize function to the close button
 root.protocol("WM_DELETE_WINDOW", minimize_to_tray)
 
+# Override the window close event to use confirm_quit
+root.protocol("WM_DELETE_WINDOW", confirm_quit)
+
+# Bind the quit function to the system tray menu item
+root.bind("<Escape>", lambda event: confirm_quit())
+
 # Start the client connection
 start_client()
-
-# Force the taskbar icon update after initialization
 update_taskbar_icon()
 
 root.mainloop()
