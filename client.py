@@ -9,6 +9,7 @@ from cryptography.hazmat.primitives import padding
 import os
 import ctypes
 from dotenv import load_dotenv
+import time
 
 
 class SecureChatClient:
@@ -23,6 +24,7 @@ class SecureChatClient:
         self.original_title = "Secure Etienne Intercom System"
         self.flash_count = 0
         self.flashing = False
+        self.reconnect_interval = 5  # Interval between reconnection attempts in seconds
 
         self.setup_ui()
         self.set_taskbar_icon()
@@ -133,6 +135,7 @@ class SecureChatClient:
                 print(f"Error receiving message: {e}")
                 self.send_disconnection_reason(f"Client disconnected: {e}")
                 break
+        self.reconnect()
 
     def send_message(self, event=None):
         message = self.message_entry.get()
@@ -150,14 +153,32 @@ class SecureChatClient:
                     messagebox.showerror("Error", f"Failed to send message: {e}")
 
     def start_client(self):
-        try:
-            self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.client_socket.connect((self.server_ip, self.server_port))
-            receive_thread = threading.Thread(target=self.receive_messages, daemon=True)
-            receive_thread.start()
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to connect to server: {e}")
-            self.root.quit()
+        while True:
+            try:
+                self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self.client_socket.connect((self.server_ip, self.server_port))
+                receive_thread = threading.Thread(
+                    target=self.receive_messages, daemon=True
+                )
+                receive_thread.start()
+                break
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to connect to server: {e}")
+                time.sleep(self.reconnect_interval)
+
+    def reconnect(self):
+        self.client_socket.close()
+        while True:
+            try:
+                self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self.client_socket.connect((self.server_ip, self.server_port))
+                receive_thread = threading.Thread(
+                    target=self.receive_messages, daemon=True
+                )
+                receive_thread.start()
+                break
+            except Exception as e:
+                time.sleep(self.reconnect_interval)
 
     def show_window(self, icon, item):
         icon.stop()
