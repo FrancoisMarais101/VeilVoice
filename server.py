@@ -6,6 +6,7 @@ import logging
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives import padding
 
+
 # Configure logging
 logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -60,16 +61,26 @@ class EncryptedServer:
         )
         return decrypted_message.decode()
 
-    def broadcast_message(self, message, sending_socket):
+    def encrypt_message(self, message):
+        cipher = Cipher(algorithms.AES(self.key), modes.CBC(self.iv))
+        encryptor = cipher.encryptor()
+        padder = padding.PKCS7(algorithms.AES.block_size).padder()
+        padded_message = padder.update(message.encode()) + padder.finalize()
+        encrypted_message = encryptor.update(padded_message) + encryptor.finalize()
+        return encrypted_message
+
+    def broadcast_message(self, message, sending_socket=None):
+        encrypted_message = self.encrypt_message(message)
         with self.lock:
             for client in self.clients.copy():
                 if client != sending_socket:
                     try:
-                        client.send(message)
+                        client.send(encrypted_message)
                     except socket.error:
                         self.clients.remove(client)
 
     def handle_client_encrypted(self, client_socket, addr):
+        self.broadcast_message(f"{addr} has joined the chat")
         while not self.shutdown_flag:
             try:
                 encrypted_message = client_socket.recv(1024)
@@ -77,15 +88,16 @@ class EncryptedServer:
                     break
                 message = self.decrypt_message(encrypted_message)
                 logging.info(f"Received Encrypted message from {addr}: {message}")
-                self.broadcast_message(encrypted_message, client_socket)
+                self.broadcast_message(f"{addr}: {message}", client_socket)
             except socket.error:
                 break
 
         with self.lock:
             if client_socket in self.clients:
                 self.clients.remove(client_socket)
-            logging.info(f"Client {addr} disconnected")
         client_socket.close()
+        self.broadcast_message(f"{addr} has left the chat")
+        logging.info(f"Client {addr} disconnected")
 
     def start_server(self):
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

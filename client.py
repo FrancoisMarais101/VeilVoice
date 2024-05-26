@@ -87,7 +87,7 @@ class SecureChatClient:
 
     def handle_received_message(self, message):
         self.chat_box.config(state=tk.NORMAL)
-        self.chat_box.insert(tk.END, "Received: " + message + "\n")
+        self.chat_box.insert(tk.END, message + "\n")
         self.chat_box.config(state=tk.DISABLED)
         self.chat_box.see(tk.END)
         self.bring_window_to_foreground()
